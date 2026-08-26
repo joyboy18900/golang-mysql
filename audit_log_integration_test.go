@@ -191,7 +191,17 @@ func TestAuditLogOffsetPagination(t *testing.T) {
 	}
 
 	gotIDs := map[int64]bool{}
+	var tieBlockIDsInOrder []int64
+	isTieID := func(id int64) bool {
+		for _, tieID := range wantIDs[:paginationTestTieCount] {
+			if id == tieID {
+				return true
+			}
+		}
+		return false
+	}
 
+	var tiePage int
 	for page := 1; page <= wantTotalPages; page++ {
 		body := first
 		if page != 1 {
@@ -203,6 +213,13 @@ func TestAuditLogOffsetPagination(t *testing.T) {
 				t.Fatalf("page %d: duplicate id %d", page, item.ID)
 			}
 			gotIDs[item.ID] = true
+
+			if isTieID(item.ID) {
+				tieBlockIDsInOrder = append(tieBlockIDsInOrder, item.ID)
+				if tiePage == 0 {
+					tiePage = page
+				}
+			}
 		}
 	}
 
@@ -213,6 +230,52 @@ func TestAuditLogOffsetPagination(t *testing.T) {
 		if !gotIDs[id] {
 			t.Errorf("missing id %d from offset walk", id)
 		}
+	}
+
+	if len(tieBlockIDsInOrder) != paginationTestTieCount {
+		t.Fatalf("collected %d tie-block ids across pages, want %d", len(tieBlockIDsInOrder), paginationTestTieCount)
+	}
+	for i := 1; i < len(tieBlockIDsInOrder); i++ {
+		if tieBlockIDsInOrder[i] >= tieBlockIDsInOrder[i-1] {
+			t.Fatalf("tie block not strictly descending by id at index %d: %d then %d", i, tieBlockIDsInOrder[i-1], tieBlockIDsInOrder[i])
+		}
+	}
+
+	firstRun := fetchPage(t, tiePage)
+	secondRun := fetchPage(t, tiePage)
+	if len(firstRun.Data) != len(secondRun.Data) {
+		t.Fatalf("tie page %d: got %d items then %d items", tiePage, len(firstRun.Data), len(secondRun.Data))
+	}
+	for i := range firstRun.Data {
+		if firstRun.Data[i].ID != secondRun.Data[i].ID {
+			t.Fatalf("tie page %d: order mismatch at index %d: %d != %d", tiePage, i, firstRun.Data[i].ID, secondRun.Data[i].ID)
+		}
+	}
+
+	lastPage := fetchPage(t, wantTotalPages+1)
+	if len(lastPage.Data) != 0 {
+		t.Fatalf("past-the-end page: got %d items, want 0", len(lastPage.Data))
+	}
+	if lastPage.Pagination.Page != wantTotalPages+1 {
+		t.Fatalf("past-the-end page: pagination.page = %d, want %d", lastPage.Pagination.Page, wantTotalPages+1)
+	}
+	if lastPage.Pagination.TotalItems != paginationTestRowCount {
+		t.Fatalf("past-the-end page: total_items = %d, want %d", lastPage.Pagination.TotalItems, paginationTestRowCount)
+	}
+
+	rawReq := httptest.NewRequest(fiber.MethodGet, fmt.Sprintf(
+		"/audit-log?actor_id=%d&limit=%d&page=%d", paginationTestActorID, paginationTestPageLimit, wantTotalPages+1,
+	), nil)
+	rawResp, err := app.Test(rawReq)
+	if err != nil {
+		t.Fatalf("past-the-end page: app.Test() error = %v", err)
+	}
+	rawBody, err := io.ReadAll(rawResp.Body)
+	if err != nil {
+		t.Fatalf("past-the-end page: read response body: %v", err)
+	}
+	if !strings.Contains(string(rawBody), `"data":{"data":[],`) {
+		t.Fatalf("past-the-end page: response body = %s, want it to contain %q", rawBody, `"data":{"data":[],`)
 	}
 }
 
