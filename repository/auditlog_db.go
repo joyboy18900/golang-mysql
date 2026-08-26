@@ -17,7 +17,7 @@ type auditLogRow struct {
 	Action     string
 	EntityType string
 	EntityID   *int64
-	Metadata   []byte
+	Metadata   string
 	CreatedAt  time.Time
 }
 
@@ -104,7 +104,7 @@ func toRow(entry AuditLog) (auditLogRow, error) {
 		Action:     entry.Action,
 		EntityType: entry.EntityType,
 		EntityID:   entry.EntityID,
-		Metadata:   []byte(metadata),
+		Metadata:   metadata,
 		CreatedAt:  entry.CreatedAt,
 	}, nil
 }
@@ -120,7 +120,7 @@ func (row auditLogRow) toDomain() (AuditLog, error) {
 	}
 
 	if len(row.Metadata) > 0 {
-		if err := json.Unmarshal(row.Metadata, &entry.Metadata); err != nil {
+		if err := json.Unmarshal([]byte(row.Metadata), &entry.Metadata); err != nil {
 			return AuditLog{}, fmt.Errorf("unmarshal audit log metadata: %w", err)
 		}
 	}
