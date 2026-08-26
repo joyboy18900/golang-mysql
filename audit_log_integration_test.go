@@ -30,7 +30,7 @@ const (
 
 	cursorTestActorID   = 7
 	cursorTestRowCount  = 220
-	cursorTestTieCount  = 12
+	cursorTestTieCount  = 60
 	cursorTestPageLimit = 25
 	cursorTestMaxPages  = 20
 )
