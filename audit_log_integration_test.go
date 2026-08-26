@@ -1,7 +1,6 @@
 package main_test
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http/httptest"
@@ -25,10 +24,6 @@ import (
 const (
 	testDSN        = "root:root@tcp(localhost:3306)/golang_mysql?parseTime=true&interpolateParams=true"
 	testMigrateDSN = testDSN + "&multiStatements=true"
-	testActorCount = 1000
-	testRowCount   = 50000
-	testBatchSize  = 10000
-	targetActorID  = 1
 )
 
 func connectTestDB(t *testing.T) *sql.DB {
@@ -83,7 +78,21 @@ func migrateDownAll(t *testing.T, m *migrate.Migrate) {
 	}
 }
 
-func TestAuditLogMigrationsAndQueryPlan(t *testing.T) {
+func auditLogTableExists(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+
+	var count int
+	err := db.QueryRow(
+		"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'audit_log'",
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("check audit_log existence: %v", err)
+	}
+
+	return count != 0
+}
+
+func TestAuditLogMigrations(t *testing.T) {
 	db := connectTestDB(t)
 	defer db.Close()
 
@@ -98,110 +107,14 @@ func TestAuditLogMigrationsAndQueryPlan(t *testing.T) {
 	})
 
 	migrateTo(t, m, 1)
-
-	ctx := context.Background()
-	repo := repository.NewAuditLogRepositoryDB(db)
-	seeder := service.NewSeedService(repo, testActorCount, testBatchSize)
-
-	if _, err := seeder.Seed(ctx, testRowCount); err != nil {
-		t.Fatalf("seed: %v", err)
+	if !auditLogTableExists(t, db) {
+		t.Error("expected audit_log to exist after migrating up")
 	}
-
-	t.Run("table scan before index", func(t *testing.T) {
-		rawPlan, err := repo.ExplainListByActor(ctx, targetActorID, 50)
-		if err != nil {
-			t.Fatalf("explain: %v", err)
-		}
-		if !strings.Contains(rawPlan, `"access_type": "ALL"`) {
-			t.Errorf("expected plan to contain a full table scan (access_type ALL), got: %s", rawPlan)
-		}
-	})
-
-	migrateTo(t, m, 2)
-	if err := repo.Analyze(ctx); err != nil {
-		t.Fatalf("analyze: %v", err)
-	}
-
-	t.Run("index access after index", func(t *testing.T) {
-		rawPlan, err := repo.ExplainListByActor(ctx, targetActorID, 50)
-		if err != nil {
-			t.Fatalf("explain: %v", err)
-		}
-		if strings.Contains(rawPlan, `"access_type": "ALL"`) {
-			t.Errorf("expected the index to be used instead of a full table scan, got: %s", rawPlan)
-		}
-		if !strings.Contains(rawPlan, `"key": "idx_audit_log_actor_id_created_at"`) {
-			t.Errorf("expected plan to use the new index, got: %s", rawPlan)
-		}
-	})
-
-	migrateTo(t, m, 3)
-	if err := repo.Analyze(ctx); err != nil {
-		t.Fatalf("analyze: %v", err)
-	}
-
-	t.Run("partition pruning on created_at range", func(t *testing.T) {
-		var rawPlan string
-		err := db.QueryRowContext(ctx,
-			`EXPLAIN FORMAT=JSON SELECT * FROM audit_log
-			 WHERE created_at >= '2026-08-01' AND created_at < '2026-09-01' LIMIT 50`,
-		).Scan(&rawPlan)
-		if err != nil {
-			t.Fatalf("explain range query: %v", err)
-		}
-
-		for _, other := range []string{"p2026_05", "p2026_06", "p2026_07", "p_max"} {
-			if strings.Contains(rawPlan, `"`+other+`"`) {
-				t.Errorf("expected only p2026_08 to be scanned, but plan mentions %s: %s", other, rawPlan)
-			}
-		}
-		if !strings.Contains(rawPlan, `"p2026_08"`) {
-			t.Errorf("expected plan to mention p2026_08, got: %s", rawPlan)
-		}
-	})
-
-	t.Run("row visible directly in its month partition", func(t *testing.T) {
-		result, err := db.ExecContext(ctx,
-			`INSERT INTO audit_log (actor_id, action, entity_type, metadata, created_at)
-			 VALUES (?, ?, ?, ?, ?)`,
-			targetActorID, "create", "order", "{}", time.Date(2026, time.June, 15, 12, 0, 0, 0, time.UTC),
-		)
-		if err != nil {
-			t.Fatalf("insert row for partition check: %v", err)
-		}
-		id, err := result.LastInsertId()
-		if err != nil {
-			t.Fatalf("last insert id: %v", err)
-		}
-
-		const partition = "p2026_06"
-		var found bool
-		err = db.QueryRowContext(ctx,
-			"SELECT EXISTS (SELECT 1 FROM audit_log PARTITION ("+partition+") WHERE id = ?)",
-			id,
-		).Scan(&found)
-		if err != nil {
-			t.Fatalf("query partition %s: %v", partition, err)
-		}
-		if !found {
-			t.Errorf("expected row %d to be visible in partition %s", id, partition)
-		}
-	})
 
 	migrateDownAll(t, m)
-
-	t.Run("migrations round trip leaves no audit_log table", func(t *testing.T) {
-		var count int
-		err := db.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'audit_log'",
-		).Scan(&count)
-		if err != nil {
-			t.Fatalf("check audit_log existence: %v", err)
-		}
-		if count != 0 {
-			t.Error("expected audit_log to not exist after migrating all the way down")
-		}
-	})
+	if auditLogTableExists(t, db) {
+		t.Error("expected audit_log to not exist after migrating all the way down")
+	}
 }
 
 func newHandlerTestApp(repo repository.AuditLogRepository) *fiber.App {

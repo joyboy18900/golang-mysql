@@ -19,7 +19,4 @@ type AuditLog struct {
 type AuditLogRepository interface {
 	Create(ctx context.Context, entry AuditLog) (*AuditLog, error)
 	ListByActor(ctx context.Context, actorID int64, limit int) ([]AuditLog, error)
-	BatchInsert(ctx context.Context, entries []AuditLog) (int64, error)
-	Analyze(ctx context.Context) error
-	ExplainListByActor(ctx context.Context, actorID int64, limit int) (string, error)
 }

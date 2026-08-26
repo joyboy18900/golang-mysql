@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -78,58 +77,6 @@ func (r auditLogRepositoryDB) ListByActor(ctx context.Context, actorID int64, li
 	}
 
 	return entries, nil
-}
-
-func (r auditLogRepositoryDB) BatchInsert(ctx context.Context, entries []AuditLog) (int64, error) {
-	if len(entries) == 0 {
-		return 0, nil
-	}
-
-	placeholders := make([]string, len(entries))
-	args := make([]any, 0, len(entries)*6)
-	for i, entry := range entries {
-		metadata, err := marshalMetadata(entry.Metadata)
-		if err != nil {
-			return 0, fmt.Errorf("batch insert audit log: %w", err)
-		}
-		placeholders[i] = "(?, ?, ?, ?, ?, ?)"
-		args = append(args, entry.ActorID, entry.Action, entry.EntityType, entry.EntityID, metadata, entry.CreatedAt)
-	}
-
-	query := fmt.Sprintf(
-		`INSERT INTO audit_log (actor_id, action, entity_type, entity_id, metadata, created_at) VALUES %s`,
-		strings.Join(placeholders, ", "),
-	)
-
-	result, err := r.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("batch insert audit log: %w", err)
-	}
-
-	n, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("batch insert audit log: %w", err)
-	}
-
-	return n, nil
-}
-
-func (r auditLogRepositoryDB) Analyze(ctx context.Context) error {
-	if _, err := r.db.ExecContext(ctx, "ANALYZE TABLE audit_log"); err != nil {
-		return fmt.Errorf("analyze audit log: %w", err)
-	}
-
-	return nil
-}
-
-func (r auditLogRepositoryDB) ExplainListByActor(ctx context.Context, actorID int64, limit int) (string, error) {
-	var plan string
-	err := r.db.QueryRowContext(ctx, "EXPLAIN FORMAT=JSON "+auditLogListByActorQuery, actorID, limit).Scan(&plan)
-	if err != nil {
-		return "", fmt.Errorf("explain list audit log by actor: %w", err)
-	}
-
-	return plan, nil
 }
 
 func marshalMetadata(metadata map[string]any) (string, error) {
