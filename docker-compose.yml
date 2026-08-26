@@ -1,5 +1,5 @@
 services:
-  mysql:
+  db:
     image: mysql:8.4
     environment:
       MYSQL_DATABASE: golang_mysql
@@ -12,44 +12,17 @@ services:
       timeout: 5s
       retries: 5
 
-  migrate:
-    build: .
-    depends_on:
-      mysql:
-        condition: service_healthy
-    environment:
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: golang_mysql
-    command: ["migrate", "up"]
-
-  seed:
-    build: .
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    environment:
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: golang_mysql
-    command: ["seed", "1000000"]
-
   app:
     build: .
     depends_on:
-      seed:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     environment:
       APP_PORT: 8080
-      DB_HOST: mysql
+      DB_HOST: db
       DB_PORT: 3306
       DB_USER: root
       DB_PASSWORD: root
       DB_NAME: golang_mysql
     ports:
       - "8080:8080"
-    command: ["serve"]
