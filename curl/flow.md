@@ -33,7 +33,23 @@ curl -X POST http://localhost:8080/audit-log \
 { "code": 201, "message": "audit log entry created", "data": { "id": 2, "actor_id": 42, "action": "update", "entity_type": "order", "entity_id": null, "metadata": {"foo":"bar"}, "created_at": "2026-08-26T17:10:25.973Z" } }
 ```
 
-## 2. List an actor's activity history, one page at a time
+## 2. List an actor's activity history
+
+```bash
+curl "http://localhost:8080/audit-log?actor_id=42"
+```
+
+```json
+{ "code": 200, "message": "audit log entries retrieved", "data": { "data": [ { "id": 2, "actor_id": 42, "action": "update", "entity_type": "order", "entity_id": null, "metadata": {"foo":"bar"}, "created_at": "2026-08-26T17:10:25.973Z" }, { "id": 1, "actor_id": 42, "action": "login", "entity_type": "session", "entity_id": null, "metadata": {}, "created_at": "2026-08-26T17:10:20.441Z" } ], "pagination": { "page": 1, "limit": 50, "total_items": 2, "total_pages": 1 } } }
+```
+
+This plain call - just `actor_id`, no `page` or `limit` - is a valid first
+call. The client does not need to know how many pages exist ahead of time:
+`page`/`limit` default to `1`/`50`, and the response's `pagination` block
+already reports `total_items`/`total_pages`, which the client then uses to
+decide whether to fetch more.
+
+## 3. Walk pages, one at a time
 
 ```bash
 curl "http://localhost:8080/audit-log?actor_id=42&page=1&limit=1"
@@ -57,7 +73,7 @@ curl "http://localhost:8080/audit-log?actor_id=42&page=2&limit=1"
 `pagination.total_pages` tells the client when to stop - `page > total_pages`
 still returns `200` with an empty `data` array, not an error.
 
-## 3. Rejection cases
+## 4. Rejection cases
 
 Missing `actor_id`:
 
