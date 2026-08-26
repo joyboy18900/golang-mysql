@@ -51,32 +51,34 @@ func (r auditLogRepositoryDB) Create(ctx context.Context, entry AuditLog) (*Audi
 	return &created, nil
 }
 
-func (r auditLogRepositoryDB) ListByActor(ctx context.Context, params ListByActorParams) ([]AuditLog, error) {
-	tx := r.db.WithContext(ctx).
+func (r auditLogRepositoryDB) ListByActor(ctx context.Context, params ListByActorParams) (ListByActorResult, error) {
+	var total int64
+	if err := r.db.WithContext(ctx).Model(&auditLogRow{}).
 		Where("actor_id = ?", params.ActorID).
-		Order("created_at DESC, id DESC").
-		Limit(params.Limit)
-
-	if params.After != nil {
-		tx = tx.Where("created_at < ? OR (created_at = ? AND id < ?)",
-			params.After.CreatedAt, params.After.CreatedAt, params.After.ID)
+		Count(&total).Error; err != nil {
+		return ListByActorResult{}, fmt.Errorf("count audit log by actor: %w", err)
 	}
 
+	offset := (params.Page - 1) * params.Limit
 	var rows []auditLogRow
-	if err := tx.Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("list audit log by actor: %w", err)
+	if err := r.db.WithContext(ctx).
+		Where("actor_id = ?", params.ActorID).
+		Order("created_at DESC, id DESC").
+		Offset(offset).Limit(params.Limit).
+		Find(&rows).Error; err != nil {
+		return ListByActorResult{}, fmt.Errorf("list audit log by actor: %w", err)
 	}
 
 	entries := make([]AuditLog, len(rows))
 	for i, row := range rows {
 		entry, err := row.toDomain()
 		if err != nil {
-			return nil, fmt.Errorf("list audit log by actor: %w", err)
+			return ListByActorResult{}, fmt.Errorf("list audit log by actor: %w", err)
 		}
 		entries[i] = entry
 	}
 
-	return entries, nil
+	return ListByActorResult{Items: entries, TotalItems: total}, nil
 }
 
 func marshalMetadata(metadata map[string]any) (string, error) {

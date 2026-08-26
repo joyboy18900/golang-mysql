@@ -37,6 +37,14 @@ func (h auditLogHandler) ListByActor(c *fiber.Ctx) error {
 		return handleError(c, errs.NewValidationError("actor_id query parameter is required"))
 	}
 
+	page := 0
+	if raw := c.Query("page"); raw != "" {
+		page, err = strconv.Atoi(raw)
+		if err != nil || page < 1 {
+			return handleError(c, errs.NewValidationError("page must be a positive integer"))
+		}
+	}
+
 	limit := 0
 	if raw := c.Query("limit"); raw != "" {
 		limit, err = strconv.Atoi(raw)
@@ -47,8 +55,8 @@ func (h auditLogHandler) ListByActor(c *fiber.Ctx) error {
 
 	resp, err := h.auditLogSvc.ListByActor(c.Context(), service.ListAuditLogRequest{
 		ActorID: actorID,
+		Page:    page,
 		Limit:   limit,
-		Cursor:  c.Query("cursor"),
 	})
 	if err != nil {
 		return handleError(c, err)

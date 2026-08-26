@@ -48,45 +48,39 @@ func (s auditLogService) ListByActor(ctx context.Context, req ListAuditLogReques
 	if req.ActorID <= 0 {
 		return nil, errs.NewValidationError("actor_id is required")
 	}
+	if req.Page < 0 {
+		return nil, errs.NewValidationError("page must be a positive integer")
+	}
 
+	page := req.Page
+	if page == 0 {
+		page = 1
+	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = defaultListLimit
 	}
 
-	var after *repository.AuditLogCursor
-	if req.Cursor != "" {
-		decoded, err := decodeCursor(req.Cursor)
-		if err != nil {
-			return nil, err
-		}
-		after = decoded
-	}
-
-	entries, err := s.repo.ListByActor(ctx, repository.ListByActorParams{
-		ActorID: req.ActorID,
-		Limit:   limit + 1,
-		After:   after,
-	})
+	result, err := s.repo.ListByActor(ctx, repository.ListByActorParams{ActorID: req.ActorID, Page: page, Limit: limit})
 	if err != nil {
 		logs.Error(err)
 		return nil, errs.NewUnexpectedError()
 	}
 
-	var nextCursor *string
-	if len(entries) > limit {
-		entries = entries[:limit]
-		last := entries[len(entries)-1]
-		encoded := encodeCursor(repository.AuditLogCursor{CreatedAt: last.CreatedAt, ID: last.ID})
-		nextCursor = &encoded
+	pages := 0
+	if result.TotalItems > 0 {
+		pages = int((result.TotalItems + int64(limit) - 1) / int64(limit))
 	}
 
-	items := make([]AuditLogResponse, len(entries))
-	for i, entry := range entries {
+	items := make([]AuditLogResponse, len(result.Items))
+	for i, entry := range result.Items {
 		items[i] = toAuditLogResponse(entry)
 	}
 
-	return &ListAuditLogResponse{Items: items, NextCursor: nextCursor}, nil
+	return &ListAuditLogResponse{
+		Data:       items,
+		Pagination: Pagination{Page: page, Limit: limit, TotalItems: result.TotalItems, TotalPages: pages},
+	}, nil
 }
 
 func toAuditLogResponse(entry repository.AuditLog) AuditLogResponse {

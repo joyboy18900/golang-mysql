@@ -25,13 +25,20 @@ type AuditLogResponse struct {
 
 type ListAuditLogRequest struct {
 	ActorID int64
+	Page    int
 	Limit   int
-	Cursor  string
+}
+
+type Pagination struct {
+	Page       int   `json:"page"`
+	Limit      int   `json:"limit"`
+	TotalItems int64 `json:"total_items"`
+	TotalPages int   `json:"total_pages"`
 }
 
 type ListAuditLogResponse struct {
-	Items      []AuditLogResponse `json:"items"`
-	NextCursor *string            `json:"next_cursor"`
+	Data       []AuditLogResponse `json:"data"`
+	Pagination Pagination         `json:"pagination"`
 }
 
 //go:generate go tool mockgen -destination=../mock/mock_service/auditlog.go golang-mysql/service AuditLogService

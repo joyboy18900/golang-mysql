@@ -57,10 +57,10 @@ func (mr *MockAuditLogRepositoryMockRecorder) Create(ctx, entry any) *gomock.Cal
 }
 
 // ListByActor mocks base method.
-func (m *MockAuditLogRepository) ListByActor(ctx context.Context, params repository.ListByActorParams) ([]repository.AuditLog, error) {
+func (m *MockAuditLogRepository) ListByActor(ctx context.Context, params repository.ListByActorParams) (repository.ListByActorResult, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListByActor", ctx, params)
-	ret0, _ := ret[0].([]repository.AuditLog)
+	ret0, _ := ret[0].(repository.ListByActorResult)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

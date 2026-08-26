@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -28,11 +29,10 @@ const (
 	testDSN        = "root:root@tcp(localhost:3306)/golang_mysql?parseTime=true&interpolateParams=true"
 	testMigrateDSN = testDSN + "&multiStatements=true"
 
-	cursorTestActorID   = 7
-	cursorTestRowCount  = 220
-	cursorTestTieCount  = 60
-	cursorTestPageLimit = 25
-	cursorTestMaxPages  = 20
+	paginationTestActorID   = 7
+	paginationTestRowCount  = 220
+	paginationTestTieCount  = 60
+	paginationTestPageLimit = 25
 )
 
 func connectTestDB(t *testing.T) *sql.DB {
@@ -126,7 +126,7 @@ func TestAuditLogMigrations(t *testing.T) {
 	}
 }
 
-func TestAuditLogCursorPagination(t *testing.T) {
+func TestAuditLogOffsetPagination(t *testing.T) {
 	db := connectTestDB(t)
 	defer db.Close()
 
@@ -139,11 +139,11 @@ func TestAuditLogCursorPagination(t *testing.T) {
 		_ = m2.Down()
 	})
 
-	if _, err := db.Exec("DELETE FROM audit_log WHERE actor_id = ?", cursorTestActorID); err != nil {
+	if _, err := db.Exec("DELETE FROM audit_log WHERE actor_id = ?", paginationTestActorID); err != nil {
 		t.Fatalf("clear fixture rows: %v", err)
 	}
 
-	wantIDs := seedCursorFixture(t, db)
+	wantIDs := seedPaginationFixture(t, db)
 
 	gormDB, err := gorm.Open(gormmysql.New(gormmysql.Config{Conn: db}), &gorm.Config{})
 	if err != nil {
@@ -157,16 +157,10 @@ func TestAuditLogCursorPagination(t *testing.T) {
 	app := fiber.New()
 	app.Get("/audit-log", hdlr.ListByActor)
 
-	gotIDs := map[int64]bool{}
-	cursor := ""
-	terminated := false
+	fetchPage := func(t *testing.T, page int) service.ListAuditLogResponse {
+		t.Helper()
 
-	for page := 0; page < cursorTestMaxPages; page++ {
-		url := fmt.Sprintf("/audit-log?actor_id=%d&limit=%d", cursorTestActorID, cursorTestPageLimit)
-		if cursor != "" {
-			url += "&cursor=" + cursor
-		}
-
+		url := fmt.Sprintf("/audit-log?actor_id=%d&limit=%d&page=%d", paginationTestActorID, paginationTestPageLimit, page)
 		req := httptest.NewRequest(fiber.MethodGet, url, nil)
 		resp, err := app.Test(req)
 		if err != nil {
@@ -183,22 +177,33 @@ func TestAuditLogCursorPagination(t *testing.T) {
 			t.Fatalf("page %d: decode response: %v", page, err)
 		}
 
-		for _, item := range envelope.Data.Items {
+		return envelope.Data
+	}
+
+	first := fetchPage(t, 1)
+	if first.Pagination.TotalItems != paginationTestRowCount {
+		t.Fatalf("total_items = %d, want %d", first.Pagination.TotalItems, paginationTestRowCount)
+	}
+
+	wantTotalPages := (paginationTestRowCount + paginationTestPageLimit - 1) / paginationTestPageLimit
+	if first.Pagination.TotalPages != wantTotalPages {
+		t.Fatalf("total_pages = %d, want %d", first.Pagination.TotalPages, wantTotalPages)
+	}
+
+	gotIDs := map[int64]bool{}
+
+	for page := 1; page <= wantTotalPages; page++ {
+		body := first
+		if page != 1 {
+			body = fetchPage(t, page)
+		}
+
+		for _, item := range body.Data {
 			if gotIDs[item.ID] {
 				t.Fatalf("page %d: duplicate id %d", page, item.ID)
 			}
 			gotIDs[item.ID] = true
 		}
-
-		if envelope.Data.NextCursor == nil {
-			terminated = true
-			break
-		}
-		cursor = *envelope.Data.NextCursor
-	}
-
-	if !terminated {
-		t.Fatalf("cursor walk did not terminate within %d pages", cursorTestMaxPages)
 	}
 
 	if len(gotIDs) != len(wantIDs) {
@@ -206,27 +211,27 @@ func TestAuditLogCursorPagination(t *testing.T) {
 	}
 	for _, id := range wantIDs {
 		if !gotIDs[id] {
-			t.Errorf("missing id %d from cursor walk", id)
+			t.Errorf("missing id %d from offset walk", id)
 		}
 	}
 }
 
-func seedCursorFixture(t *testing.T, db *sql.DB) []int64 {
+func seedPaginationFixture(t *testing.T, db *sql.DB) []int64 {
 	t.Helper()
 
 	tieAt := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
-	ids := make([]int64, 0, cursorTestRowCount)
+	ids := make([]int64, 0, paginationTestRowCount)
 
-	for i := 0; i < cursorTestRowCount; i++ {
+	for i := 0; i < paginationTestRowCount; i++ {
 		createdAt := tieAt.Add(-time.Duration(i) * time.Minute)
-		if i < cursorTestTieCount {
+		if i < paginationTestTieCount {
 			createdAt = tieAt
 		}
 
 		result, err := db.Exec(
 			`INSERT INTO audit_log (actor_id, action, entity_type, metadata, created_at)
 			 VALUES (?, ?, ?, ?, ?)`,
-			cursorTestActorID, "update", "order", "{}", createdAt,
+			paginationTestActorID, "update", "order", "{}", createdAt,
 		)
 		if err != nil {
 			t.Fatalf("insert fixture row %d: %v", i, err)
@@ -262,7 +267,9 @@ func TestAuditLogHandler_CreateAndList(t *testing.T) {
 		Metadata: map[string]any{}, CreatedAt: time.Now(),
 	}
 	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(&created, nil)
-	repo.EXPECT().ListByActor(gomock.Any(), gomock.Any()).Return([]repository.AuditLog{created}, nil)
+	repo.EXPECT().ListByActor(gomock.Any(), gomock.Any()).Return(
+		repository.ListByActorResult{Items: []repository.AuditLog{created}, TotalItems: 1}, nil,
+	)
 
 	app := newHandlerTestApp(repo)
 
@@ -295,8 +302,35 @@ func TestAuditLogHandler_CreateAndList(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if len(envelope.Data.Items) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(envelope.Data.Items))
+	if len(envelope.Data.Data) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(envelope.Data.Data))
+	}
+}
+
+func TestAuditLogHandler_ListEmptyResultIsEmptyArray(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	repo := mock_repository.NewMockAuditLogRepository(ctrl)
+	repo.EXPECT().ListByActor(gomock.Any(), gomock.Any()).Return(
+		repository.ListByActorResult{Items: []repository.AuditLog{}, TotalItems: 0}, nil,
+	)
+
+	app := newHandlerTestApp(repo)
+
+	req := httptest.NewRequest(fiber.MethodGet, "/audit-log?actor_id=42", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("app.Test() error = %v", err)
+	}
+	if resp.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, fiber.StatusOK)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if !strings.Contains(string(body), `"data":{"data":[],`) {
+		t.Fatalf("response body = %s, want it to contain %q", body, `"data":{"data":[],`)
 	}
 }
 
