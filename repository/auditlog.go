@@ -15,8 +15,19 @@ type AuditLog struct {
 	CreatedAt  time.Time
 }
 
+type AuditLogCursor struct {
+	CreatedAt time.Time
+	ID        int64
+}
+
+type ListByActorParams struct {
+	ActorID int64
+	Limit   int
+	After   *AuditLogCursor
+}
+
 //go:generate go tool mockgen -destination=../mock/mock_repository/auditlog.go golang-mysql/repository AuditLogRepository
 type AuditLogRepository interface {
 	Create(ctx context.Context, entry AuditLog) (*AuditLog, error)
-	ListByActor(ctx context.Context, actorID int64, limit int) ([]AuditLog, error)
+	ListByActor(ctx context.Context, params ListByActorParams) ([]AuditLog, error)
 }

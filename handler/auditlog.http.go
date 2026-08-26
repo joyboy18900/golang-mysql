@@ -45,10 +45,14 @@ func (h auditLogHandler) ListByActor(c *fiber.Ctx) error {
 		}
 	}
 
-	entries, err := h.auditLogSvc.ListByActor(c.Context(), actorID, limit)
+	resp, err := h.auditLogSvc.ListByActor(c.Context(), service.ListAuditLogRequest{
+		ActorID: actorID,
+		Limit:   limit,
+		Cursor:  c.Query("cursor"),
+	})
 	if err != nil {
 		return handleError(c, err)
 	}
 
-	return sendSuccess(c, fiber.StatusOK, "audit log entries retrieved", entries)
+	return sendSuccess(c, fiber.StatusOK, "audit log entries retrieved", resp)
 }

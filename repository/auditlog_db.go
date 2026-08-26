@@ -51,14 +51,19 @@ func (r auditLogRepositoryDB) Create(ctx context.Context, entry AuditLog) (*Audi
 	return &created, nil
 }
 
-func (r auditLogRepositoryDB) ListByActor(ctx context.Context, actorID int64, limit int) ([]AuditLog, error) {
+func (r auditLogRepositoryDB) ListByActor(ctx context.Context, params ListByActorParams) ([]AuditLog, error) {
+	tx := r.db.WithContext(ctx).
+		Where("actor_id = ?", params.ActorID).
+		Order("created_at DESC, id DESC").
+		Limit(params.Limit)
+
+	if params.After != nil {
+		tx = tx.Where("created_at < ? OR (created_at = ? AND id < ?)",
+			params.After.CreatedAt, params.After.CreatedAt, params.After.ID)
+	}
+
 	var rows []auditLogRow
-	err := r.db.WithContext(ctx).
-		Where("actor_id = ?", actorID).
-		Order("created_at DESC").
-		Limit(limit).
-		Find(&rows).Error
-	if err != nil {
+	if err := tx.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list audit log by actor: %w", err)
 	}
 

@@ -23,8 +23,19 @@ type AuditLogResponse struct {
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
+type ListAuditLogRequest struct {
+	ActorID int64
+	Limit   int
+	Cursor  string
+}
+
+type ListAuditLogResponse struct {
+	Items      []AuditLogResponse `json:"items"`
+	NextCursor *string            `json:"next_cursor"`
+}
+
 //go:generate go tool mockgen -destination=../mock/mock_service/auditlog.go golang-mysql/service AuditLogService
 type AuditLogService interface {
 	Create(ctx context.Context, req CreateAuditLogRequest) (*AuditLogResponse, error)
-	ListByActor(ctx context.Context, actorID int64, limit int) ([]AuditLogResponse, error)
+	ListByActor(ctx context.Context, req ListAuditLogRequest) (*ListAuditLogResponse, error)
 }

@@ -137,7 +137,7 @@ func TestAuditLogHandler_CreateAndList(t *testing.T) {
 		Metadata: map[string]any{}, CreatedAt: time.Now(),
 	}
 	repo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(&created, nil)
-	repo.EXPECT().ListByActor(gomock.Any(), int64(42), gomock.Any()).Return([]repository.AuditLog{created}, nil)
+	repo.EXPECT().ListByActor(gomock.Any(), gomock.Any()).Return([]repository.AuditLog{created}, nil)
 
 	app := newHandlerTestApp(repo)
 
@@ -165,13 +165,13 @@ func TestAuditLogHandler_CreateAndList(t *testing.T) {
 	}
 
 	var envelope struct {
-		Data []service.AuditLogResponse `json:"data"`
+		Data service.ListAuditLogResponse `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode list response: %v", err)
 	}
-	if len(envelope.Data) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(envelope.Data))
+	if len(envelope.Data.Items) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(envelope.Data.Items))
 	}
 }
 

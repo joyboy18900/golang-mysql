@@ -8,7 +8,7 @@ import (
 	"golang-mysql/repository"
 )
 
-const DefaultListLimit = 50
+const defaultListLimit = 50
 
 type auditLogService struct {
 	repo repository.AuditLogRepository
@@ -44,26 +44,49 @@ func (s auditLogService) Create(ctx context.Context, req CreateAuditLogRequest) 
 	return &resp, nil
 }
 
-func (s auditLogService) ListByActor(ctx context.Context, actorID int64, limit int) ([]AuditLogResponse, error) {
-	if actorID <= 0 {
+func (s auditLogService) ListByActor(ctx context.Context, req ListAuditLogRequest) (*ListAuditLogResponse, error) {
+	if req.ActorID <= 0 {
 		return nil, errs.NewValidationError("actor_id is required")
 	}
+
+	limit := req.Limit
 	if limit <= 0 {
-		limit = DefaultListLimit
+		limit = defaultListLimit
 	}
 
-	entries, err := s.repo.ListByActor(ctx, actorID, limit)
+	var after *repository.AuditLogCursor
+	if req.Cursor != "" {
+		decoded, err := decodeCursor(req.Cursor)
+		if err != nil {
+			return nil, err
+		}
+		after = decoded
+	}
+
+	entries, err := s.repo.ListByActor(ctx, repository.ListByActorParams{
+		ActorID: req.ActorID,
+		Limit:   limit + 1,
+		After:   after,
+	})
 	if err != nil {
 		logs.Error(err)
 		return nil, errs.NewUnexpectedError()
 	}
 
-	responses := make([]AuditLogResponse, len(entries))
-	for i, entry := range entries {
-		responses[i] = toAuditLogResponse(entry)
+	var nextCursor *string
+	if len(entries) > limit {
+		entries = entries[:limit]
+		last := entries[len(entries)-1]
+		encoded := encodeCursor(repository.AuditLogCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+		nextCursor = &encoded
 	}
 
-	return responses, nil
+	items := make([]AuditLogResponse, len(entries))
+	for i, entry := range entries {
+		items[i] = toAuditLogResponse(entry)
+	}
+
+	return &ListAuditLogResponse{Items: items, NextCursor: nextCursor}, nil
 }
 
 func toAuditLogResponse(entry repository.AuditLog) AuditLogResponse {
