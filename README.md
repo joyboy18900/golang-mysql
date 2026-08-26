@@ -19,6 +19,11 @@ Runs the migrations automatically on startup, then starts the API on
 - `POST /audit-log`
 - `GET /audit-log?actor_id=X&page=N&limit=Y`
 
+`actor_id` is the only required parameter. The first call can omit `page`
+and `limit` entirely; they default to `1` and `50`, and the response's
+`pagination` block already reports `total_items`/`total_pages`, so the
+caller never needs to know the page count ahead of time.
+
 See `curl/flow.md` for full request/response examples.
 
 ## Schema (`migrations/`)
