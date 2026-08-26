@@ -1,0 +1,54 @@
+package handler
+
+import (
+	"strconv"
+
+	"golang-mysql/errs"
+	"golang-mysql/service"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+type auditLogHandler struct {
+	auditLogSvc service.AuditLogService
+}
+
+func NewAuditLogHandler(auditLogSvc service.AuditLogService) auditLogHandler {
+	return auditLogHandler{auditLogSvc: auditLogSvc}
+}
+
+func (h auditLogHandler) Create(c *fiber.Ctx) error {
+	var req service.CreateAuditLogRequest
+	if err := c.BodyParser(&req); err != nil {
+		return handleError(c, errs.NewValidationError("invalid request body"))
+	}
+
+	resp, err := h.auditLogSvc.Create(c.Context(), req)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	return sendSuccess(c, fiber.StatusCreated, "audit log entry created", resp)
+}
+
+func (h auditLogHandler) ListByActor(c *fiber.Ctx) error {
+	actorID, err := strconv.ParseInt(c.Query("actor_id"), 10, 64)
+	if err != nil {
+		return handleError(c, errs.NewValidationError("actor_id query parameter is required"))
+	}
+
+	limit := 0
+	if raw := c.Query("limit"); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil {
+			return handleError(c, errs.NewValidationError("limit must be an integer"))
+		}
+	}
+
+	entries, err := h.auditLogSvc.ListByActor(c.Context(), actorID, limit)
+	if err != nil {
+		return handleError(c, err)
+	}
+
+	return sendSuccess(c, fiber.StatusOK, "audit log entries retrieved", entries)
+}
