@@ -1,0 +1,14 @@
+app:
+  port: 8080
+
+db:
+  host: localhost
+  port: 3306
+  user: root
+  password: root
+  name: golang_mysql
+
+seed:
+  row_count: 1000000
+  actor_cardinality: 20000
+  batch_size: 10000
