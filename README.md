@@ -119,10 +119,10 @@ spread, nothing fell into `p_max`:
 
 | partition | rows |
 |---|---|
-| p2026_05 | 250,403 |
-| p2026_06 | 243,461 |
-| p2026_07 | 251,572 |
-| p2026_08 | 245,050 |
+| p2026_05 | 251,280 |
+| p2026_06 | 242,981 |
+| p2026_07 | 250,987 |
+| p2026_08 | 251,572 |
 | p_max | 0 |
 
 **Tradeoffs**: the actor-lookup query doesn't prune, since `actor_id` isn't
@@ -213,15 +213,19 @@ assumed from documentation):
   go-sql-driver/mysql sends `[]byte` as a binary-charset parameter, which
   MySQL's `JSON` type refuses to implicitly convert. Fixed by passing
   `string(metadata)` instead.
-- **golang-migrate operational quirks.** MySQL DDL auto-commits (no
-  transactional `ALTER TABLE`), so a migration killed partway through
-  leaves golang-migrate's version row `dirty` and needs a manual
-  `migrate force`, unlike Postgres where a failed migration rolls back
-  cleanly. Separately, golang-migrate's MySQL driver needs
-  `multiStatements=true` on its DSN to run a migration file with more than
-  one statement (migration `0003` has two `ALTER TABLE`s) - the app's own
+- **golang-migrate operational quirks.** Confirmed live: without
+  `multiStatements=true` on its DSN, golang-migrate's MySQL driver fails
+  migration `0003` (which has two `ALTER TABLE` statements) with a plain
+  SQL syntax error, since it sends the whole file as one query and the
+  driver refuses multiple statements per query by default - the app's own
   runtime connection deliberately omits that flag, since it never needs
-  to run multiple statements per query.
+  to run more than one statement per query. Also confirmed live: MySQL DDL
+  auto-commits (no transactional `ALTER TABLE`), so a migration that fails
+  partway through leaves golang-migrate's version row `dirty` (`SELECT *
+  FROM schema_migrations` showed `dirty=1`), and any further `migrate up`
+  refuses with `Dirty database version N. Fix and force version.` until a
+  manual `migrate force <N>` clears it - unlike Postgres, where a failed
+  migration rolls back cleanly inside its own transaction.
 
 ## API
 
