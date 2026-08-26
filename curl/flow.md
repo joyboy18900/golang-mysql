@@ -20,7 +20,7 @@ curl -X POST http://localhost:8080/audit-log \
 ```
 
 ```json
-{ "code": 201, "message": "audit log entry created", "data": { "id": 1, "actor_id": 42, "action": "login", "entity_type": "session", "entity_id": null, "metadata": {}, "created_at": "2026-08-26T15:49:39.779Z" } }
+{ "code": 201, "message": "audit log entry created", "data": { "id": 1, "actor_id": 42, "action": "login", "entity_type": "session", "entity_id": null, "metadata": {}, "created_at": "2026-08-26T17:10:20.441Z" } }
 ```
 
 ```bash
@@ -30,31 +30,32 @@ curl -X POST http://localhost:8080/audit-log \
 ```
 
 ```json
-{ "code": 201, "message": "audit log entry created", "data": { "id": 2, "actor_id": 42, "action": "update", "entity_type": "order", "entity_id": null, "metadata": {"foo":"bar"}, "created_at": "2026-08-26T15:49:39.81Z" } }
+{ "code": 201, "message": "audit log entry created", "data": { "id": 2, "actor_id": 42, "action": "update", "entity_type": "order", "entity_id": null, "metadata": {"foo":"bar"}, "created_at": "2026-08-26T17:10:25.973Z" } }
 ```
 
 ## 2. List an actor's activity history, one page at a time
 
 ```bash
-curl "http://localhost:8080/audit-log?actor_id=42&limit=1"
+curl "http://localhost:8080/audit-log?actor_id=42&page=1&limit=1"
 ```
 
 ```json
-{ "code": 200, "message": "audit log entries retrieved", "data": { "items": [ { "id": 2, "actor_id": 42, "action": "update", "entity_type": "order", "entity_id": null, "metadata": {"foo":"bar"}, "created_at": "2026-08-26T15:49:39.81Z" } ], "next_cursor": "MTc4Nzc1OTM3OTgxMDAwMDoy" } }
+{ "code": 200, "message": "audit log entries retrieved", "data": { "data": [ { "id": 2, "actor_id": 42, "action": "update", "entity_type": "order", "entity_id": null, "metadata": {"foo":"bar"}, "created_at": "2026-08-26T17:10:25.973Z" } ], "pagination": { "page": 1, "limit": 1, "total_items": 2, "total_pages": 2 } } }
 ```
 
-`limit` defaults to 50. Pass `next_cursor` back as `cursor` to get the next
-page:
+`page` defaults to `1`, `limit` defaults to `50`. Pass `page=2` to get the
+next page:
 
 ```bash
-curl "http://localhost:8080/audit-log?actor_id=42&limit=1&cursor=MTc4Nzc1OTM3OTgxMDAwMDoy"
+curl "http://localhost:8080/audit-log?actor_id=42&page=2&limit=1"
 ```
 
 ```json
-{ "code": 200, "message": "audit log entries retrieved", "data": { "items": [ { "id": 1, "actor_id": 42, "action": "login", "entity_type": "session", "entity_id": null, "metadata": {}, "created_at": "2026-08-26T15:49:39.779Z" } ], "next_cursor": null } }
+{ "code": 200, "message": "audit log entries retrieved", "data": { "data": [ { "id": 1, "actor_id": 42, "action": "login", "entity_type": "session", "entity_id": null, "metadata": {}, "created_at": "2026-08-26T17:10:20.441Z" } ], "pagination": { "page": 2, "limit": 1, "total_items": 2, "total_pages": 2 } } }
 ```
 
-`next_cursor: null` means this was the last page.
+`pagination.total_pages` tells the client when to stop - `page > total_pages`
+still returns `200` with an empty `data` array, not an error.
 
 ## 3. Rejection cases
 
@@ -80,14 +81,14 @@ curl -X POST http://localhost:8080/audit-log \
 { "code": 422, "message": "actor_id, action and entity_type are required", "data": null }
 ```
 
-Malformed cursor:
+`page` must be a positive integer:
 
 ```bash
-curl "http://localhost:8080/audit-log?actor_id=42&cursor=not-a-real-cursor"
+curl "http://localhost:8080/audit-log?actor_id=42&page=0"
 ```
 
 ```json
-{ "code": 422, "message": "invalid cursor", "data": null }
+{ "code": 422, "message": "page must be a positive integer", "data": null }
 ```
 
 ## Stop
