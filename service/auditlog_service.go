@@ -8,7 +8,7 @@ import (
 	"golang-mysql/repository"
 )
 
-const defaultListLimit = 50
+const DefaultListLimit = 50
 
 type auditLogService struct {
 	repo repository.AuditLogRepository
@@ -49,7 +49,7 @@ func (s auditLogService) ListByActor(ctx context.Context, actorID int64, limit i
 		return nil, errs.NewValidationError("actor_id is required")
 	}
 	if limit <= 0 {
-		limit = defaultListLimit
+		limit = DefaultListLimit
 	}
 
 	entries, err := s.repo.ListByActor(ctx, actorID, limit)

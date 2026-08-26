@@ -21,8 +21,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-const benchListLimit = 50
-
 func main() {
 	initConfig()
 
@@ -69,11 +67,17 @@ func mysqlDSN() string {
 	)
 }
 
-func initDB() *sql.DB {
-	db, err := sql.Open("mysql", mysqlDSN())
+func mustOpenDB(dsn string) *sql.DB {
+	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		panic(fmt.Errorf("open mysql: %w", err))
 	}
+
+	return db
+}
+
+func initDB() *sql.DB {
+	db := mustOpenDB(mysqlDSN())
 	if err := db.Ping(); err != nil {
 		panic(fmt.Errorf("ping mysql: %w", err))
 	}
@@ -81,11 +85,13 @@ func initDB() *sql.DB {
 	return db
 }
 
+func openAuditLogRepo() (repository.AuditLogRepository, *sql.DB) {
+	db := initDB()
+	return repository.NewAuditLogRepositoryDB(db), db
+}
+
 func newMigrate() *migrate.Migrate {
-	db, err := sql.Open("mysql", mysqlDSN()+"&multiStatements=true")
-	if err != nil {
-		panic(fmt.Errorf("open mysql for migrate: %w", err))
-	}
+	db := mustOpenDB(mysqlDSN() + "&multiStatements=true")
 
 	driver, err := migratemysql.WithInstance(db, &migratemysql.Config{})
 	if err != nil {
@@ -152,10 +158,9 @@ func runSeed(args []string) {
 		os.Exit(1)
 	}
 
-	db := initDB()
+	repo, db := openAuditLogRepo()
 	defer db.Close()
 
-	repo := repository.NewAuditLogRepositoryDB(db)
 	seedSvc := service.NewSeedService(repo, viper.GetInt("seed.actor_cardinality"), viper.GetInt("seed.batch_size"))
 
 	inserted, err := seedSvc.Seed(context.Background(), rowCount)
@@ -177,13 +182,12 @@ func runBench(args []string) {
 		os.Exit(1)
 	}
 
-	db := initDB()
+	repo, db := openAuditLogRepo()
 	defer db.Close()
 
-	repo := repository.NewAuditLogRepositoryDB(db)
 	benchSvc := service.NewBenchService(repo)
 
-	result, err := benchSvc.ListByActorPlan(context.Background(), actorID, benchListLimit)
+	result, err := benchSvc.ListByActorPlan(context.Background(), actorID, service.DefaultListLimit)
 	if err != nil {
 		panic(fmt.Errorf("bench: %w", err))
 	}
@@ -193,10 +197,9 @@ func runBench(args []string) {
 }
 
 func runServe() {
-	db := initDB()
+	auditLogRepo, db := openAuditLogRepo()
 	defer db.Close()
 
-	auditLogRepo := repository.NewAuditLogRepositoryDB(db)
 	auditLogSvc := service.NewAuditLogService(auditLogRepo)
 	auditLogHdlr := handler.NewAuditLogHandler(auditLogSvc)
 

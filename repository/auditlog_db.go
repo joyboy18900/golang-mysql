@@ -6,7 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
+
+const auditLogListByActorQuery = `SELECT id, actor_id, action, entity_type, entity_id, metadata, created_at
+FROM audit_log
+WHERE actor_id = ?
+ORDER BY created_at DESC
+LIMIT ?`
+
+const emptyMetadataJSON = "{}"
 
 type auditLogRepositoryDB struct {
 	db *sql.DB
@@ -17,15 +26,15 @@ func NewAuditLogRepositoryDB(db *sql.DB) AuditLogRepository {
 }
 
 func (r auditLogRepositoryDB) Create(ctx context.Context, entry AuditLog) (*AuditLog, error) {
-	metadata, err := json.Marshal(entry.Metadata)
+	metadata, err := marshalMetadata(entry.Metadata)
 	if err != nil {
-		return nil, fmt.Errorf("marshal audit log metadata: %w", err)
+		return nil, fmt.Errorf("create audit log: %w", err)
 	}
 
 	result, err := r.db.ExecContext(ctx,
 		`INSERT INTO audit_log (actor_id, action, entity_type, entity_id, metadata)
 		 VALUES (?, ?, ?, ?, ?)`,
-		entry.ActorID, entry.Action, entry.EntityType, entry.EntityID, string(metadata),
+		entry.ActorID, entry.Action, entry.EntityType, entry.EntityID, metadata,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create audit log: %w", err)
@@ -36,36 +45,27 @@ func (r auditLogRepositoryDB) Create(ctx context.Context, entry AuditLog) (*Audi
 		return nil, fmt.Errorf("create audit log: %w", err)
 	}
 
-	row := r.db.QueryRowContext(ctx,
-		`SELECT id, actor_id, action, entity_type, entity_id, metadata, created_at
-		 FROM audit_log
-		 WHERE id = ?`,
-		id,
-	)
-
-	created, err := scanAuditLog(row.Scan)
-	if err != nil {
+	var createdAt time.Time
+	if err := r.db.QueryRowContext(ctx, "SELECT created_at FROM audit_log WHERE id = ?", id).
+		Scan(&createdAt); err != nil {
 		return nil, fmt.Errorf("create audit log: %w", err)
 	}
 
-	return created, nil
+	created := entry
+	created.ID = id
+	created.CreatedAt = createdAt
+
+	return &created, nil
 }
 
 func (r auditLogRepositoryDB) ListByActor(ctx context.Context, actorID int64, limit int) ([]AuditLog, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, actor_id, action, entity_type, entity_id, metadata, created_at
-		 FROM audit_log
-		 WHERE actor_id = ?
-		 ORDER BY created_at DESC
-		 LIMIT ?`,
-		actorID, limit,
-	)
+	rows, err := r.db.QueryContext(ctx, auditLogListByActorQuery, actorID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list audit log by actor: %w", err)
 	}
 	defer rows.Close()
 
-	var entries []AuditLog
+	entries := make([]AuditLog, 0, limit)
 	for rows.Next() {
 		entry, err := scanAuditLog(rows.Scan)
 		if err != nil {
@@ -88,12 +88,12 @@ func (r auditLogRepositoryDB) BatchInsert(ctx context.Context, entries []AuditLo
 	placeholders := make([]string, len(entries))
 	args := make([]any, 0, len(entries)*6)
 	for i, entry := range entries {
-		metadata, err := json.Marshal(entry.Metadata)
+		metadata, err := marshalMetadata(entry.Metadata)
 		if err != nil {
-			return 0, fmt.Errorf("marshal audit log metadata: %w", err)
+			return 0, fmt.Errorf("batch insert audit log: %w", err)
 		}
 		placeholders[i] = "(?, ?, ?, ?, ?, ?)"
-		args = append(args, entry.ActorID, entry.Action, entry.EntityType, entry.EntityID, string(metadata), entry.CreatedAt)
+		args = append(args, entry.ActorID, entry.Action, entry.EntityType, entry.EntityID, metadata, entry.CreatedAt)
 	}
 
 	query := fmt.Sprintf(
@@ -101,18 +101,8 @@ func (r auditLogRepositoryDB) BatchInsert(ctx context.Context, entries []AuditLo
 		strings.Join(placeholders, ", "),
 	)
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("batch insert audit log: %w", err)
-	}
-	defer tx.Rollback()
-
-	result, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return 0, fmt.Errorf("batch insert audit log: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("batch insert audit log: %w", err)
 	}
 
@@ -134,20 +124,25 @@ func (r auditLogRepositoryDB) Analyze(ctx context.Context) error {
 
 func (r auditLogRepositoryDB) ExplainListByActor(ctx context.Context, actorID int64, limit int) (string, error) {
 	var plan string
-	err := r.db.QueryRowContext(ctx,
-		`EXPLAIN FORMAT=JSON
-		 SELECT id, actor_id, action, entity_type, entity_id, metadata, created_at
-		 FROM audit_log
-		 WHERE actor_id = ?
-		 ORDER BY created_at DESC
-		 LIMIT ?`,
-		actorID, limit,
-	).Scan(&plan)
+	err := r.db.QueryRowContext(ctx, "EXPLAIN FORMAT=JSON "+auditLogListByActorQuery, actorID, limit).Scan(&plan)
 	if err != nil {
 		return "", fmt.Errorf("explain list audit log by actor: %w", err)
 	}
 
 	return plan, nil
+}
+
+func marshalMetadata(metadata map[string]any) (string, error) {
+	if len(metadata) == 0 {
+		return emptyMetadataJSON, nil
+	}
+
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("marshal audit log metadata: %w", err)
+	}
+
+	return string(encoded), nil
 }
 
 func scanAuditLog(scan func(dest ...any) error) (*AuditLog, error) {

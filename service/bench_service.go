@@ -56,13 +56,6 @@ func ParsePlan(rawJSON string, elapsed time.Duration) (*QueryPlanResult, error) 
 	return &QueryPlanResult{Summary: summary, RawPlan: rawJSON}, nil
 }
 
-// findAccessNode walks MySQL's EXPLAIN FORMAT=JSON tree looking for the node
-// that describes how a table is actually accessed (the "table_name"/
-// "access_type" object). MySQL nests that object under different wrapper
-// keys depending on the query shape - "ordering_operation" when a sort is
-// involved, "grouping_operation" for GROUP BY, "nested_loop" (an array) for
-// joins - so this recurses through the whole tree rather than assuming a
-// fixed path.
 func findAccessNode(node any) (accessNode, bool) {
 	switch v := node.(type) {
 	case map[string]any:
