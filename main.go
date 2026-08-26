@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"golang-mysql/handler"
@@ -24,19 +23,27 @@ import (
 
 func main() {
 	initConfig()
+	runMigrations()
 
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: go run . <migrate|serve> [args]")
-		os.Exit(1)
+	gormDB := openGormDB()
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		panic(fmt.Errorf("get underlying sql.DB: %w", err))
 	}
+	defer sqlDB.Close()
 
-	switch os.Args[1] {
-	case "migrate":
-		runMigrate(os.Args[2:])
-	case "serve":
-		runServe()
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n", os.Args[1])
+	auditLogRepo := repository.NewAuditLogRepositoryDB(gormDB)
+	auditLogSvc := service.NewAuditLogService(auditLogRepo)
+	auditLogHdlr := handler.NewAuditLogHandler(auditLogSvc)
+
+	app := fiber.New()
+	app.Post("/audit-log", auditLogHdlr.Create)
+	app.Get("/audit-log", auditLogHdlr.ListByActor)
+
+	port := viper.GetString("app.port")
+	logs.Info("server started on port " + port)
+	if err := app.Listen(":" + port); err != nil {
+		logs.Error(err)
 		os.Exit(1)
 	}
 }
@@ -64,15 +71,6 @@ func mysqlDSN() string {
 	)
 }
 
-func mustOpenDB(dsn string) *sql.DB {
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		panic(fmt.Errorf("open mysql: %w", err))
-	}
-
-	return db
-}
-
 func openGormDB() *gorm.DB {
 	db, err := gorm.Open(gormmysql.Open(mysqlDSN()), &gorm.Config{})
 	if err != nil {
@@ -82,13 +80,12 @@ func openGormDB() *gorm.DB {
 	return db
 }
 
-func openAuditLogRepo() (repository.AuditLogRepository, *gorm.DB) {
-	db := openGormDB()
-	return repository.NewAuditLogRepositoryDB(db), db
-}
-
-func newMigrate() *migrate.Migrate {
-	db := mustOpenDB(mysqlDSN() + "&multiStatements=true")
+func runMigrations() {
+	db, err := sql.Open("mysql", mysqlDSN()+"&multiStatements=true")
+	if err != nil {
+		panic(fmt.Errorf("open migrate mysql: %w", err))
+	}
+	defer db.Close()
 
 	driver, err := migratemysql.WithInstance(db, &migratemysql.Config{})
 	if err != nil {
@@ -100,65 +97,9 @@ func newMigrate() *migrate.Migrate {
 		panic(fmt.Errorf("new migrate: %w", err))
 	}
 
-	return m
-}
-
-func runMigrate(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: migrate <up|down|goto N>")
-		os.Exit(1)
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		panic(fmt.Errorf("migrate up: %w", err))
 	}
 
-	m := newMigrate()
-	defer m.Close()
-
-	var err error
-	switch args[0] {
-	case "up":
-		err = m.Up()
-	case "down":
-		err = m.Down()
-	case "goto":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: migrate goto N")
-			os.Exit(1)
-		}
-		var version int
-		version, err = strconv.Atoi(args[1])
-		if err == nil {
-			err = m.Migrate(uint(version))
-		}
-	default:
-		fmt.Fprintf(os.Stderr, "unknown migrate subcommand %q\n", args[0])
-		os.Exit(1)
-	}
-
-	if err != nil && err != migrate.ErrNoChange {
-		panic(fmt.Errorf("migrate %s: %w", args[0], err))
-	}
-
-	logs.Info("migrate " + args[0] + " complete")
-}
-
-func runServe() {
-	auditLogRepo, gormDB := openAuditLogRepo()
-	sqlDB, err := gormDB.DB()
-	if err != nil {
-		panic(fmt.Errorf("get underlying sql.DB: %w", err))
-	}
-	defer sqlDB.Close()
-
-	auditLogSvc := service.NewAuditLogService(auditLogRepo)
-	auditLogHdlr := handler.NewAuditLogHandler(auditLogSvc)
-
-	app := fiber.New()
-	app.Post("/audit-log", auditLogHdlr.Create)
-	app.Get("/audit-log", auditLogHdlr.ListByActor)
-
-	port := viper.GetString("app.port")
-	logs.Info("server started on port " + port)
-	if err := app.Listen(":" + port); err != nil {
-		logs.Error(err)
-		os.Exit(1)
-	}
+	logs.Info("migrations up to date")
 }
