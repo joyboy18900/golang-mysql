@@ -18,6 +18,8 @@ import (
 	migratemysql "github.com/golang-migrate/migrate/v4/database/mysql"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/spf13/viper"
+	gormmysql "gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -71,17 +73,17 @@ func mustOpenDB(dsn string) *sql.DB {
 	return db
 }
 
-func initDB() *sql.DB {
-	db := mustOpenDB(mysqlDSN())
-	if err := db.Ping(); err != nil {
-		panic(fmt.Errorf("ping mysql: %w", err))
+func openGormDB() *gorm.DB {
+	db, err := gorm.Open(gormmysql.Open(mysqlDSN()), &gorm.Config{})
+	if err != nil {
+		panic(fmt.Errorf("open gorm mysql: %w", err))
 	}
 
 	return db
 }
 
-func openAuditLogRepo() (repository.AuditLogRepository, *sql.DB) {
-	db := initDB()
+func openAuditLogRepo() (repository.AuditLogRepository, *gorm.DB) {
+	db := openGormDB()
 	return repository.NewAuditLogRepositoryDB(db), db
 }
 
@@ -139,8 +141,12 @@ func runMigrate(args []string) {
 }
 
 func runServe() {
-	auditLogRepo, db := openAuditLogRepo()
-	defer db.Close()
+	auditLogRepo, gormDB := openAuditLogRepo()
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		panic(fmt.Errorf("get underlying sql.DB: %w", err))
+	}
+	defer sqlDB.Close()
 
 	auditLogSvc := service.NewAuditLogService(auditLogRepo)
 	auditLogHdlr := handler.NewAuditLogHandler(auditLogSvc)
