@@ -8,6 +8,9 @@ actor's activity history a page at a time.
 
 ```bash
 docker compose up -d --build
+curl -X POST http://localhost:8080/audit-log \
+  -H "Content-Type: application/json" \
+  -d '{"actor_id":42,"action":"login","entity_type":"session"}'
 curl "http://localhost:8080/audit-log?actor_id=42"
 ```
 
@@ -31,8 +34,8 @@ See `curl/flow.md` for full request/response examples.
    dead but deliberate schema.
 2. **`0002_add_actor_id_index`** - composite index on `(actor_id,
    created_at DESC)`. It does not include `id`, so exact `created_at`
-   ties get a small in-memory sort by the database - correctness is
-   unaffected, the query's `id DESC` tiebreak still produces a strict
+   ties get a small in-memory sort by the database. Correctness is
+   unaffected: the query's `id DESC` tiebreak still produces a strict
    order.
 
 ## Tests
@@ -53,7 +56,7 @@ go generate ./...   # regenerate repository and service mocks
   `data` array instead of an error; both endpoints return the right
   envelope/errors.
 
-The integration test owns its own database - run it against a scratch
+The integration test owns its own database. Run it against a scratch
 MySQL, not a database with data you care about.
 
 See `curl/flow.md` for a manual walkthrough of every endpoint.
